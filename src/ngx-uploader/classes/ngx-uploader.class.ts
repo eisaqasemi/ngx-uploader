@@ -3,7 +3,7 @@ import { Observable } from 'rxjs/Observable';
 import { Subscription } from 'rxjs/Subscription';
 import { Subscriber } from 'rxjs/Subscriber';
 import 'rxjs/add/observable/from';
-import 'rxjs/add/operator/merge';
+import 'rxjs/add/operator/mergeAll';
 
 export enum UploadStatus {
   Queue,
@@ -35,14 +35,14 @@ export interface UploadFile {
 }
 
 export interface UploadOutput {
-  type: 'addedToQueue' | 'allAddedToQueue' | 'uploading' | 'done' | 'removed' | 'start' | 'cancelled' | 'dragOver' | 'dragOut' | 'drop'|'fileContent';
+  type: 'addedToQueue' | 'allAddedToQueue' | 'uploading' | 'done' | 'removed' | 'start' | 'cancelled' | 'dragOver' | 'dragOut' | 'drop' | 'removed' | 'fileContent';
   file?: UploadFile;
   nativeFile?: File;
   fileContent?:any;
 }
 
 export interface UploadInput {
-  type: 'uploadAll' | 'uploadFile' | 'cancel' | 'cancelAll';
+  type: 'uploadAll' | 'uploadFile' | 'cancel' | 'cancelAll' | 'remove' | 'removeAll';
   url?: string;
   method?: string;
   id?: string;
@@ -103,6 +103,7 @@ export class NgUploaderService {
       };
 
       this.serviceEvents.emit({ type: 'addedToQueue', file: uploadFile, nativeFile: file });
+      this.uploads.push({ file: uploadFile, sub: { instance: null } });
       const reader = new FileReader();
       reader.addEventListener("load", ()=>{
         this.serviceEvents.emit({ type: 'fileContent',file:uploadFile,fileContent:reader.result});
@@ -120,30 +121,18 @@ export class NgUploaderService {
     input.subscribe((event: UploadInput) => {
       switch (event.type) {
         case 'uploadFile':
-          this.serviceEvents.emit({ type: 'start', file: event.file });
-
-          let sub: {instance: Subscription} = {instance: null};
-
-          this.uploads.push({ file: event.file, sub: sub });
-
-          sub.instance = this.uploadFile(event.file, event).subscribe(data => {
-            this.serviceEvents.emit(data);
-          });
+          const uploadFileIndex = this.uploads.findIndex(upload => upload.file === event.file);
+          if (uploadFileIndex !== -1) {
+            this.uploads[uploadFileIndex].sub.instance = this.uploadFile(event.file, event).subscribe(data => {
+              this.serviceEvents.emit(data);
+            });
+          }
         break;
         case 'uploadAll':
           const concurrency = event.concurrency > 0 ? event.concurrency : Number.POSITIVE_INFINITY;
-          this.uploads = this.uploads.concat(this.files.map(file => {
-            return { file: file, sub: { instance: null } };
-          }));
-
           Observable.from(this.files.map(file => this.uploadFile(file, event)))
-            .merge(concurrency)
-            .subscribe((uploadInstance: Observable<UploadOutput>) => {
-              const index = this.uploads.findIndex(u => u.sub.instance === null);
-              this.uploads[index].sub.instance = uploadInstance.subscribe((data: UploadOutput) => {
-                this.serviceEvents.emit(data);
-              });
-            });
+            .mergeAll(concurrency)
+            .subscribe((data: UploadOutput) => this.serviceEvents.emit(data));
         break;
         case 'cancel':
           const id = event.id || null;
@@ -169,6 +158,18 @@ export class NgUploaderService {
             upload.file.progress.status = UploadStatus.Canceled;
             this.serviceEvents.emit({ type: 'cancelled', file: upload.file });
           });
+        break;
+        case 'remove':
+          if (!event.id) {
+            return;
+          }
+
+          const i = this.uploads.findIndex(upload => upload.file.id === event.id);
+          if (i !== -1) {
+            const file = this.uploads[i].file;
+            this.uploads.splice(i, 1);
+            this.serviceEvents.emit({ type: 'removed', file: file });
+          }
         break;
       }
     });

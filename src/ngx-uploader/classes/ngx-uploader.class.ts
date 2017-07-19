@@ -35,9 +35,10 @@ export interface UploadFile {
 }
 
 export interface UploadOutput {
-  type: 'addedToQueue' | 'allAddedToQueue' | 'uploading' | 'done' | 'removed' | 'start' | 'cancelled' | 'dragOver' | 'dragOut' | 'drop';
+  type: 'addedToQueue' | 'allAddedToQueue' | 'uploading' | 'done' | 'removed' | 'start' | 'cancelled' | 'dragOver' | 'dragOut' | 'drop'|'fileContent';
   file?: UploadFile;
   nativeFile?: File;
+  fileContent?:any;
 }
 
 export interface UploadInput {
@@ -102,6 +103,13 @@ export class NgUploaderService {
       };
 
       this.serviceEvents.emit({ type: 'addedToQueue', file: uploadFile, nativeFile: file });
+      const reader = new FileReader();
+      reader.addEventListener("load", ()=>{
+        this.serviceEvents.emit({ type: 'fileContent',file:uploadFile,fileContent:reader.result});
+      }, false);
+
+      reader.readAsDataURL(file);
+
       return uploadFile;
     }));
 
